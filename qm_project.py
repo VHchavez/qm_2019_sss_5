@@ -1,11 +1,26 @@
 import numpy as np
 
 def atom(ao_index):
-    '''Returns the atom index part of an atomic orbital index.'''
+    '''Returns the atom index part of an atomic orbital index.
+
+    This is a longer explanation of what the function does, NOT how the function does it. 
+
+    Parameters
+    ----------
+    ao_index : int
+        index of atomic orbital.
+
+    Returns
+    -------
+    ao_index // orbitals_per_atom
+        An integer which is the index of the atom that the atomic orbital is centered on.
+    '''
     return ao_index // orbitals_per_atom
 
 def orb(ao_index):
-    '''Returns the orbital type of an atomic orbital index.'''
+    '''Returns the orbital type of an atomic orbital index.
+    
+    This is a more detailed description'''
     orb_index = ao_index % orbitals_per_atom
     return orbital_types[orb_index]
 
@@ -33,7 +48,22 @@ def hopping_energy(o1, o2, r12, model_parameters):
     return ans
 
 def coulomb_energy(o1, o2, r12):
-    '''Returns the Coulomb matrix element for a pair of multipoles of type o1 & o2 separated by a vector r12.'''
+    '''Returns the Coulomb matrix element for a pair of multipoles of type o1 & o2 separated by a vector r12.
+    
+    Parameters
+    ----------
+    o1 : string
+        Type of orbital of the first orbital. s, p, d, ...
+    o2 : string
+        Type of orbital of the second orbital. s, p, d, ...
+    r12 : np.array
+        Array of size (3) specifying the nuclear separation vector
+    
+    Results
+    -------
+    ans : float
+        The coulombic repulsion energy between two multipoles defined by the parameters.
+    '''
     r12_length = np.linalg.norm(r12)
     if o1 == 's' and o2 == 's':
         ans = 1.0 / r12_length
@@ -48,7 +78,25 @@ def coulomb_energy(o1, o2, r12):
     return ans
 
 def pseudopotential_energy(o, r, model_parameters):
-    '''Returns the energy of a pseudopotential between a multipole of type o and an atom separated by a vector r.'''
+    '''Returns the energy of a pseudopotential between a multipole of type o and an atom separated by a vector r.
+    
+    The semiempirical model approximations strongly distort the physics of inter-atomic Pauli repulsion, and we compensate for these errors with a 
+    short-range ionic pseudopotential, which is a common tool in physics for building effective models of ionic cores:!
+
+    Parameters
+    ----------
+    o : str
+        This string id the orbital type. Either s, px, py, pz
+    r : float
+        The non-rescaled distane.
+    model_parameters : dict
+        The parameter values have been pre-optimized for this project, but the fitting process 
+        and reference data are both listed at the end of the project if you'd like to learn more about them
+    Returns
+    -------
+    ans : float
+        Dictionary is bonds with atom pair as tuples and lengths as values
+    '''
     ans = model_parameters['v_pseudo']
     r_rescaled = r / model_parameters['r_pseudo']
     ans *= np.exp(1.0 - np.dot(r_rescaled, r_rescaled))
@@ -58,7 +106,9 @@ def pseudopotential_energy(o, r, model_parameters):
 
 
 def calculate_energy_ion(atomic_coordinates):
-    '''Returns the ionic contribution to the total energy for an input list of atomic coordinates.'''
+    '''The interaction kernels from the pesudopotential energy function enable us to define and 
+calculate the ion-ion energy in Hamiltonian. The following below shows how to implement the ionic energy 
+which determines the ionic contribution to the overall energy related to an input list of specified atomic coordinates.,'''
     energy_ion = 0.0
     for i, r_i in enumerate(atomic_coordinates):
         for j, r_j in enumerate(atomic_coordinates):
@@ -76,8 +126,7 @@ def calculate_potential_vector(atomic_coordinates, model_parameters):
         for atom_i, r_i in enumerate(atomic_coordinates):
             r_pi = atomic_coordinates[atom(p)] - r_i
             if atom_i != atom(p):
-                potential_vector[p] += (
-                    pseudopotential_energy(orb(p), r_pi, model_parameters) -
+                potential_vector[p] += (pseudopotential_energy(orb(p), r_pi, model_parameters) -
                     ionic_charge * coulomb_energy(orb(p), 's', r_pi))
     return potential_vector
 
@@ -115,16 +164,14 @@ def calculate_chi_tensor(atomic_coordinates, model_parameters):
             q = ao_index(atom(p), orb_q)
             for orb_r in orbital_types:
                 r = ao_index(atom(p), orb_r)
-                chi_tensor[p, q, r] = chi_on_atom(orb(p), orb(q), orb(r),
-                                                  model_parameters)
+                chi_tensor[p, q, r] = chi_on_atom(orb(p), orb(q), orb(r), model_parameters)
     return chi_tensor
 
 def calculate_hamiltonian_matrix(atomic_coordinates, model_parameters):
     '''Returns the 1-body Hamiltonian matrix for an input list of atomic coordinates.'''
     ndof = len(atomic_coordinates) * orbitals_per_atom
     hamiltonian_matrix = np.zeros((ndof, ndof))
-    potential_vector = calculate_potential_vector(atomic_coordinates,
-                                                  model_parameters)
+    potential_vector = calculate_potential_vector(atomic_coordinates, model_parameters)
     for p in range(ndof):
         for q in range(ndof):
             if atom(p) != atom(q):
@@ -139,9 +186,7 @@ def calculate_hamiltonian_matrix(atomic_coordinates, model_parameters):
                     hamiltonian_matrix[p, q] += model_parameters['energy_p']
                 for orb_r in orbital_types:
                     r = ao_index(atom(p), orb_r)
-                    hamiltonian_matrix[p, q] += (
-                        chi_on_atom(orb(p), orb(q), orb_r, model_parameters) *
-                        potential_vector[r])
+                    hamiltonian_matrix[p, q] += (chi_on_atom(orb(p), orb(q), orb_r, model_parameters) * potential_vector[r])
     return hamiltonian_matrix
 
 def calculate_atomic_density_matrix(atomic_coordinates):
@@ -182,8 +227,7 @@ def calculate_density_matrix(fock_matrix):
         -------
         density_matrix : numpy array
             Density Matrix obtain from the fock matrix'''
-    num_occ = (ionic_charge // 2) * np.size(fock_matrix,
-                                            0) // orbitals_per_atom
+    num_occ = (ionic_charge // 2) * np.size(fock_matrix, 0) // orbitals_per_atom
     orbital_energy, orbital_matrix = np.linalg.eigh(fock_matrix)
     occupied_matrix = orbital_matrix[:, :num_occ]
     density_matrix = occupied_matrix @ occupied_matrix.T
@@ -197,13 +241,10 @@ def scf_cycle(hamiltonian_matrix, interaction_matrix, density_matrix,
     for iteration in range(max_scf_iterations):
         new_fock_matrix = calculate_fock_matrix(hamiltonian_matrix, interaction_matrix, old_density_matrix, chi_tensor)
         new_density_matrix = calculate_density_matrix(new_fock_matrix)
-
         error_norm = np.linalg.norm( old_density_matrix - new_density_matrix )
         if error_norm < convergence_tolerance:
             return new_density_matrix, new_fock_matrix
-
-        old_density_matrix = (mixing_fraction * new_density_matrix
-                              + (1.0 - mixing_fraction) * old_density_matrix)
+        old_density_matrix = (mixing_fraction * new_density_matrix + (1.0 - mixing_fraction) * old_density_matrix)
     print("WARNING: SCF cycle didn't converge")
     return new_density_matrix, new_fock_matrix
 
